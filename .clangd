@@ -1,0 +1,2 @@
+CompileFlags:
+  Add: [-Wno-unused-function, -Wno-unused-variable, -Wno-unused-label, -Wno-macro-redefined, -DCORE_IMPLEMENTATION, -DARENA_IMPLEMENTATION, -DSTRING_IMPLEMENTATION, -DARRAY_IMPLEMENTATION]
