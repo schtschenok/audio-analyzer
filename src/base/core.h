@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 typedef bool b;
@@ -82,6 +83,14 @@ static inline bool is_power_of_two(size_t x) {
 static inline size_t align_size(const size_t size, const size_t alignment) {
     assert(is_power_of_two(alignment));
     return (size + (alignment - 1)) & ~(alignment - 1);
+}
+
+static inline void int3(void) {
+#if defined(__GNUC__) || defined(__clang__)
+    __asm__ volatile("int3");
+#elif defined(_MSC_VER)
+    __debugbreak();
+#endif
 }
 
 #endif
