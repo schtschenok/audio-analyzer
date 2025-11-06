@@ -161,32 +161,36 @@ void* process_file(void* arg) {
     i32* data_i32 = (i32*)data;
     f32* data_f32 = (f32*)data;
 
+    if (fmt_chunk.channels != 2 || fmt_chunk.format_type != 1 || fmt_chunk.bits_per_sample != 16) {
+        goto unmap_file;
+    }
+
     switch (fmt_chunk.format_type) {
     case 1:
         switch (fmt_chunk.bits_per_sample) {
         case 16:
-            for (u32 i = 0; i < data_chunk.size; i = i + 4) {
-                const u32 resulting_index = (i / fmt_chunk.channels + (data_chunk.size / fmt_chunk.channels) * (i % fmt_chunk.channels)) / 2;
+            for (u32 i = 0; i < data_chunk.size; i += sizeof(i16)) {
+                const u32 resulting_index = (i / fmt_chunk.channels + (data_chunk.size / fmt_chunk.channels) * ((i / sizeof(i16)) % fmt_chunk.channels)); // TODO: ALMOST WORKING, going 0, 64001, 2, 64003 etc. Needs fix.
                 data_i16[resulting_index] = original_data[i];
             }
             break;
         case 24: // 32
-            return NULL;
+            goto unmap_file;
         case 32:
-            return NULL;
+            goto unmap_file;
         default:
-            return NULL;
+            goto unmap_file;
         }
         break;
     case 3:
-        return NULL;
+        goto unmap_file;
     case 65534:
-        return NULL;
+        goto unmap_file;
     default:
-        return NULL;
+        goto unmap_file;
     }
 
-    // int3();
+    int3();
 
 unmap_file:
     munmap(file, sb.st_size);
@@ -250,8 +254,15 @@ int main(const int argc, char* argv[]) {
                 snprintf(full_path, sizeof(full_path), "%s/%s", path_cstr, entry->d_name);
 
                 str_t entry_path = str_from_cstr(&arena_global, full_path);
-                process_file(&entry_path);
-                file_counter++;
+                struct stat entry_stat;
+                if (stat(full_path, &entry_stat) != 0) {
+                    printf("Failed to get stats for path: %s\n", full_path);
+                    continue;
+                }
+                if (entry_stat.st_mode & S_IFREG) {
+                    process_file(&entry_path);
+                    file_counter++;
+                }
             }
             closedir(dir);
         } else if (S_ISREG(path_stat.st_mode)) {

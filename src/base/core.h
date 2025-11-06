@@ -85,12 +85,11 @@ static inline size_t align_size(const size_t size, const size_t alignment) {
     return (size + (alignment - 1)) & ~(alignment - 1);
 }
 
-static inline void int3(void) {
-#if defined(__GNUC__) || defined(__clang__)
-    __asm__ volatile("int3");
+
+#if defined (__GNUC__) || defined(__clang__)
+#define int3() __asm__ volatile("int3")
 #elif defined(_MSC_VER)
-    __debugbreak();
+#define int3() __debugbreak()
 #endif
-}
 
 #endif
