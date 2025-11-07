@@ -82,6 +82,7 @@ void* process_file(void* arg) {
     }
 
     u8* file = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0); // TODO: Benchmark with | MAP_POPULATE
+
     if (file == MAP_FAILED) {
         int3();
         goto close_file;
@@ -151,7 +152,16 @@ void* process_file(void* arg) {
 
     const u8* original_data = data_chunk_in_file + 8;
 
-    u8* data = mmap(NULL, align_size(data_chunk.size, getpagesize()), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    u32 data_size = align_size(data_chunk.size, getpagesize());
+    switch (fmt_chunk.bits_per_sample) {
+    case 24:
+        data_size = data_chunk.size / 3 * 4;
+        break;
+    default:
+        data_size = data_chunk.size;
+    }
+
+    u8* data = mmap(NULL, data_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (data == MAP_FAILED) {
         int3();
         goto unmap_file;
@@ -160,43 +170,76 @@ void* process_file(void* arg) {
     i16* data_i16 = (i16*)data;
     i32* data_i32 = (i32*)data;
     f32* data_f32 = (f32*)data;
+    f64* data_f64 = (f64*)data;
 
-    if (fmt_chunk.channels != 2 || fmt_chunk.format_type != 1 || fmt_chunk.bits_per_sample != 16) {
-        goto unmap_file;
-    }
+    // if (fmt_chunk.channels != 4 || fmt_chunk.format_type != 65534 || fmt_chunk.bits_per_sample != 16) {
+    //     goto unmap_file;
+    // }
 
     switch (fmt_chunk.format_type) {
     case 1:
+    case 65534:
         switch (fmt_chunk.bits_per_sample) {
         case 16:
             for (u32 i = 0; i < data_chunk.size; i += sizeof(i16)) {
-                const u32 resulting_index = (i / fmt_chunk.channels + (data_chunk.size / fmt_chunk.channels) * ((i / sizeof(i16)) % fmt_chunk.channels)); // TODO: ALMOST WORKING, going 0, 64001, 2, 64003 etc. Needs fix.
+                const u32 resulting_index = (i / sizeof(i16) / fmt_chunk.channels) + (data_chunk.size / sizeof(i16) / fmt_chunk.channels) * (i / sizeof(i16) % fmt_chunk.channels);
                 data_i16[resulting_index] = original_data[i];
             }
             break;
         case 24: // 32
-            goto unmap_file;
+            for (u32 i = 0; i < data_chunk.size; i += 3) {
+                const u32 resulting_index = (i / 3 / fmt_chunk.channels) + (data_chunk.size / 3 / fmt_chunk.channels) * (i / 3 % fmt_chunk.channels);
+                i32 widened_24bit_value;
+
+                u8* bytes = (u8*)&original_data[i];
+                i32 value;
+
+                value = bytes[0] | bytes[1] << 8 | bytes[2] << 16;
+
+                if (value & 0x800000) {
+                    value |= (i32)0xFF000000;
+                }
+
+                data_i32[resulting_index] = value;
+            }
         case 32:
-            goto unmap_file;
+            for (u32 i = 0; i < data_chunk.size; i += sizeof(i32)) {
+                const u32 resulting_index = (i / sizeof(i32) / fmt_chunk.channels) + (data_chunk.size / sizeof(i32) / fmt_chunk.channels) * (i / sizeof(i32) % fmt_chunk.channels);
+                data_i32[resulting_index] = original_data[i];
+            }
+            break;
         default:
-            goto unmap_file;
+            break;
         }
         break;
     case 3:
-        goto unmap_file;
-    case 65534:
-        goto unmap_file;
+        switch (fmt_chunk.bits_per_sample) {
+        case 32:
+            for (u32 i = 0; i < data_chunk.size; i += sizeof(f32)) {
+                const u32 resulting_index = (i / sizeof(f32) / fmt_chunk.channels) + (data_chunk.size / sizeof(f32) / fmt_chunk.channels) * (i / sizeof(f32) % fmt_chunk.channels);
+                data_f32[resulting_index] = original_data[i];
+            }
+            break;
+        case 64:
+            for (u32 i = 0; i < data_chunk.size; i += sizeof(f64)) {
+                const u32 resulting_index = (i / sizeof(f64) / fmt_chunk.channels) + (data_chunk.size / sizeof(f64) / fmt_chunk.channels) * (i / sizeof(f64) % fmt_chunk.channels);
+                data_f64[resulting_index] = original_data[i];
+            }
+            break;
+        default:
+            break;
+        }
     default:
-        goto unmap_file;
+        goto unmap_data;
     }
 
-    int3();
-
+unmap_data:
+    munmap(data, data_size);
 unmap_file:
     munmap(file, sb.st_size);
 close_file:
     close(fd);
-clean_temp_arena:
+
     arena_clear(&arena_temp_tl);
 
     return NULL;
