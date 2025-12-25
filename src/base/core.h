@@ -76,7 +76,7 @@ static inline size_t align_size(const size_t size, const size_t alignment);
 
 #ifdef CORE_IMPLEMENTATION
 
-static inline bool is_power_of_two(size_t x) {
+static inline bool is_power_of_two(const size_t x) {
     return x != 0 && (x & (x - 1)) == 0;
 }
 
@@ -85,8 +85,7 @@ static inline size_t align_size(const size_t size, const size_t alignment) {
     return (size + (alignment - 1)) & ~(alignment - 1);
 }
 
-
-#if defined (__GNUC__) || defined(__clang__)
+#if defined(__GNUC__) || defined(__clang__)
 #define int3() __asm__ volatile("int3")
 #elif defined(_MSC_VER)
 #define int3() __debugbreak()

@@ -13,13 +13,13 @@ typedef struct {
     u64 position;
 } arena_t;
 
-arena_t arena_make(u64 size);
+static inline arena_t arena_make(u64 size);
 static inline bool arena_valid(const arena_t* arena);
 static inline void* arena_alloc(arena_t* arena, u64 size);
 static inline void* arena_alloc_aligned(arena_t* arena, u64 size, u64 alignment);
 static inline void arena_clear(arena_t* arena);
 static inline void arena_release(arena_t* arena);
-bool arena_delete(arena_t* arena);
+static inline bool arena_delete(arena_t* arena);
 
 #ifdef ARENA_IMPLEMENTATION
 
@@ -40,7 +40,7 @@ bool arena_delete(arena_t* arena);
     ((void)(addr), (void)(size))
 #endif
 
-arena_t arena_make(const u64 size) {
+static inline arena_t arena_make(const u64 size) {
     assert(size > 0);
 
     const u64 aligned_size = align_size(size, getpagesize());
@@ -80,6 +80,7 @@ static inline void* arena_alloc(arena_t* arena, const u64 size) {
     return arena_alloc_aligned(arena, size, DEFAULT_ALIGNMENT);
 }
 
+// TODO: Aligned alloc should probably align not the end, but the beginning. Also maybe add arena_align() function
 static inline void* arena_alloc_aligned(arena_t* arena, const u64 size, const u64 alignment) {
     assert(arena_valid(arena));
     assert(is_power_of_two(alignment));
@@ -116,7 +117,7 @@ static inline void arena_release(arena_t* arena) {
     arena->position = 0;
 }
 
-bool arena_delete(arena_t* arena) {
+static inline bool arena_delete(arena_t* arena) {
     assert(arena_valid(arena));
 
     ASAN_POISON_MEMORY_REGION((void*)arena->start, arena->capacity);
