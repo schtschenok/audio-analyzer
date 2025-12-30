@@ -7,7 +7,9 @@
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <unistd.h>
 
 typedef bool b;
 
@@ -101,7 +103,7 @@ static inline u64 get_page_size() {
     SYSTEM_INFO si;
     GetSystemInfo(&si);
     return si.dwPageSize;
-#elif defined(_POSIX_VERSION)
+#elif defined(__linux__)
     return getpagesize();
 #else
     return 0;

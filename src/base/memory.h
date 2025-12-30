@@ -21,7 +21,7 @@ static inline bool memory_unmap_file(void* ptr, const u64 size);
 #endif
 #include <io.h>
 #include <windows.h>
-#elif defined(_POSIX_VERSION)
+#elif defined(__linux__)
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -31,15 +31,15 @@ static inline void* memory_map_anonymous(const u64 size, const bool populate) {
     void* alloc = VirtualAlloc(NULL, align_size(size, get_page_size()), populate ? MEM_RESERVE | MEM_COMMIT : MEM_RESERVE, PAGE_READWRITE);
     assert(alloc != NULL);
     return alloc;
-#elif defined(_POSIX_VERSION)
-    const void* alloc = mmap(NULL,
-                             align_size(size, get_page_size()),
-                             PROT_READ | PROT_WRITE,
-                             populate ? MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE : MAP_PRIVATE | MAP_ANONYMOUS,
-                             -1,
-                             0);
+#elif defined(__linux__)
+    void* alloc = mmap(NULL,
+                       align_size(size, get_page_size()),
+                       PROT_READ | PROT_WRITE,
+                       populate ? MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE : MAP_PRIVATE | MAP_ANONYMOUS,
+                       -1,
+                       0);
     assert(alloc != MAP_FAILED);
-    return alloc == MAP_FAILED ? NULL : alloc;
+    return alloc;
 #else
     return NULL;
 #endif
@@ -50,7 +50,7 @@ static inline bool memory_unmap_anonymous(void* ptr, const u64 size) {
     const bool result = VirtualFree(ptr, 0, MEM_RELEASE);
     assert(result);
     return result;
-#elif defined(_POSIX_VERSION)
+#elif defined(__linux__)
     const bool result = munmap(ptr, size) == 0;
     assert(result);
     return result;
@@ -64,7 +64,7 @@ static inline bool memory_dontneed(void* ptr, const u64 size) {
     const bool result = VirtualAlloc(ptr, align_size(size, get_page_size()), MEM_DECOMMIT, PAGE_READWRITE) != NULL;
     assert(result);
     return result;
-#elif defined(_POSIX_VERSION)
+#elif defined(__linux__)
     const bool result = madvise(ptr, size, MADV_FREE) == 0;
     assert(result);
     return result;
@@ -97,9 +97,9 @@ static inline u8* memory_map_file(const i32 fd, const i64 size, const bool read,
     }
 
     return data;
-#elif defined(_POSIX_VERSION)
-    u8* data = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE | MAP_POPULATE, fd, 0);
-    if (file == MAP_FAILED) {
+#elif defined(__linux__)
+    u8* data = mmap(NULL, size, PROT_READ, MAP_PRIVATE | MAP_POPULATE, fd, 0);
+    if (data == MAP_FAILED) {
         assert(false);
         return NULL;
     }
@@ -115,7 +115,7 @@ static inline bool memory_unmap_file(void* ptr, const u64 size) {
     const bool result = UnmapViewOfFile(ptr);
     assert(result);
     return result;
-#elif defined(_POSIX_VERSION)
+#elif defined(__linux__)
     const bool result = munmap(ptr, size) == 0;
     assert(result);
     return result;
