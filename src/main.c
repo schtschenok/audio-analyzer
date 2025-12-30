@@ -535,11 +535,11 @@ int main(const int argc, char* argv[]) {
 
     const f64 benchmark_seconds = (f64)(benchmark_end_time - benchmark_start_time) / 1000.0;
     const f64 benchmark_megabytes = (f64)benchmark_bytes_processed / 1024.0 / 1024.0;
-    printf("File count: %ld\n", benchmark_files_processed);
+    printf("File count: %ld\n", (long)benchmark_files_processed);
     printf("Time: %.3fs\n", benchmark_seconds);
     printf("Size: %.3fMB\n", benchmark_megabytes);
     printf("Speed: %.3f MB/s\n", benchmark_megabytes / benchmark_seconds);
 
-    printf("Int accumulator: %ld\n", benchmark_int_accumulator);
+    printf("Int accumulator: %ld\n", (long)benchmark_int_accumulator);
     printf("Float accumulator: %.3f\n", benchmark_float_accumulator);
 }

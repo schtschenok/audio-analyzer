@@ -9,7 +9,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#ifdef __linux__
 #include <unistd.h>
+#endif
 
 typedef bool b;
 
