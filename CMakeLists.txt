@@ -1,8 +1,4 @@
-cmake_minimum_required(VERSION 3.13)
-
-set(CMAKE_C_COMPILER clang)
-
-set(CMAKE_GENERATOR Ninja)
+cmake_minimum_required(VERSION 4.0)
 
 project(audio-analyzer)
 
@@ -12,49 +8,84 @@ set(CMAKE_C_STANDARD 11)
 
 add_executable(audio-analyzer src/main.c)
 
-target_compile_options(audio-analyzer PRIVATE
-        -pthread
-        -Wall -Werror
-        -Wno-unused-function
-        -Wno-unused-variable
-        -Wno-unused-label
+if (MSVC)
+    target_compile_options(audio-analyzer PRIVATE
+            /WX
 
-        $<$<CONFIG:Debug>:
-        -fsanitize=address,undefined
-        -fno-omit-frame-pointer
-        -mno-omit-leaf-frame-pointer
-        -fno-inline
-        -g
-        -O0
-        >
+            /wd4100 # unused parameter
+            /wd4101 # unused local variable
+            /wd4102 # unreferenced label
+            /wd4189 # local variable is initialized but not referenced
 
-        $<$<CONFIG:Release>:
-        -O3
-        >
-)
+            /std:c11
+            /experimental:c11atomics
 
-target_link_options(audio-analyzer PRIVATE
-        -lm
+            $<$<CONFIG:Debug>:
+            /Od
+            /fsanitize=address
+            /RTCcsu
+            >
 
-        $<$<CONFIG:Debug>:
-        -fsanitize=address,undefined
-        >
-)
-
-if (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-    find_package(yaml-cpp REQUIRED)
-    target_link_libraries(audio-analyzer PUBLIC yaml-cpp)
-    include(FetchContent)
-    option(TRACY_ENABLE "" ON)
-    option(TRACY_ON_DEMAND "" ON)
-    FetchContent_Declare(
-            tracy
-            GIT_REPOSITORY https://github.com/wolfpld/tracy.git
-            GIT_TAG v0.13.0
-            GIT_SHALLOW TRUE
-            GIT_PROGRESS TRUE
+            $<$<CONFIG:Release>:
+            /O2
+            >
     )
-    FetchContent_MakeAvailable(tracy)
-    target_link_libraries(audio-analyzer PUBLIC TracyClient)
+else ()
+    target_compile_options(audio-analyzer PRIVATE
+            -Wall -Werror
+
+            -Wno-unused-function
+            -Wno-unused-variable
+            -Wno-unused-label
+
+            -fno-fast-math
+
+            $<$<CONFIG:Debug>:
+            -fno-omit-frame-pointer
+            -mno-omit-leaf-frame-pointer
+            -fno-inline
+            -g
+            -O0
+
+            $<$<NOT:$<BOOL:${MINGW}>>:-fsanitize=address,undefined>
+            >
+
+            $<$<CONFIG:Release>:
+            -O3
+            >
+    )
+
+    target_link_options(audio-analyzer PRIVATE
+            $<$<PLATFORM_ID:Linux>:-lm>
+
+            $<$<CONFIG:Debug>:
+            $<$<NOT:$<BOOL:${MINGW}>>:-fsanitize=address,undefined>
+            >
+    )
 endif ()
 
+
+#if (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+#    include(FetchContent)
+#    FetchContent_Declare(
+#            yaml-cpp
+#            GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+#            GIT_SHALLOW TRUE
+#            GIT_PROGRESS TRUE
+#    )
+#    FetchContent_MakeAvailable(yaml-cpp)
+#    target_link_libraries(audio-analyzer PUBLIC yaml-cpp)
+#
+#    include(FetchContent)
+#    option(TRACY_ENABLE "" ON)
+#    option(TRACY_ON_DEMAND "" ON)
+#    FetchContent_Declare(
+#            tracy
+#            GIT_REPOSITORY https://github.com/wolfpld/tracy.git
+#            GIT_TAG v0.13.1
+#            GIT_SHALLOW TRUE
+#            GIT_PROGRESS TRUE
+#    )
+#    FetchContent_MakeAvailable(tracy)
+#    target_link_libraries(audio-analyzer PUBLIC TracyClient)
+#endif ()

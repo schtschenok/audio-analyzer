@@ -21,15 +21,15 @@ typedef struct {
 } array_header_t;
 
 #define array_from_size(type, arena, size) (type*)__array_from_size(arena, sizeof(type) * size) // TODO: Maybe move away from headers to a struct, but definitely store sizeof(type)
-void* __array_from_size(arena_t* arena, u64 size);
+static inline void* __array_from_size(arena_t* arena, u64 size);
 
-array_header_t* get_array_header(void* array);
-u64 get_array_length(void* array);
-u64 get_array_capacity(void* array);
+static inline array_header_t* get_array_header(void* array);
+static inline u64 get_array_length(void* array);
+static inline u64 get_array_capacity(void* array);
 
 #ifdef ARRAY_IMPLEMENTATION
 
-void* __array_from_size(arena_t* arena, const u64 size) {
+static inline void* __array_from_size(arena_t* arena, const u64 size) {
     const uptr start = (uptr)arena_alloc(arena, sizeof(array_header_t) + size);
 
     array_header_t* header = (array_header_t*)start;
@@ -39,15 +39,15 @@ void* __array_from_size(arena_t* arena, const u64 size) {
     return (void*)(start + sizeof(array_header_t));
 }
 
-array_header_t* get_array_header(void* array) {
+static inline array_header_t* get_array_header(void* array) {
     return (array_header_t*)(((uptr)(array)) - align_size(sizeof(array_header_t), DEFAULT_ALIGNMENT)); // TODO: Add a runtime check for header? 0xBEEEEEEF
 }
 
-u64 get_array_length(void* array) {
+static inline u64 get_array_length(void* array) {
     return get_array_header(array)->length;
 }
 
-u64 get_array_capacity(void* array) {
+static inline u64 get_array_capacity(void* array) {
     return get_array_header(array)->capacity;
 }
 

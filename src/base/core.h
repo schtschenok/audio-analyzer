@@ -1,9 +1,12 @@
 #pragma once
 
+#ifndef _CRT_SECURE_NO_WARNINGS // NOLINT
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 
 typedef bool b;
@@ -71,24 +74,57 @@ typedef double f64;
 
 #define DEFAULT_ALIGNMENT 8
 
-static inline bool is_power_of_two(size_t x);
-static inline size_t align_size(const size_t size, const size_t alignment);
+static inline bool is_power_of_two(u64 x);
+static inline u64 align_size(const u64 size, const u64 alignment);
+static inline u64 get_page_size();
 
 #ifdef CORE_IMPLEMENTATION
 
-static inline bool is_power_of_two(const size_t x) {
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
+static inline bool is_power_of_two(const u64 x) {
     return x != 0 && (x & (x - 1)) == 0;
 }
 
-static inline size_t align_size(const size_t size, const size_t alignment) {
+static inline u64 align_size(const u64 size, const u64 alignment) {
     assert(is_power_of_two(alignment));
     return (size + (alignment - 1)) & ~(alignment - 1);
+}
+
+static inline u64 get_page_size() {
+#if defined(_WIN32)
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return si.dwPageSize;
+#elif defined(_POSIX_VERSION)
+    return getpagesize();
+#else
+    return 0;
+#endif
 }
 
 #if defined(__GNUC__) || defined(__clang__)
 #define int3() __asm__ volatile("int3")
 #elif defined(_MSC_VER)
 #define int3() __debugbreak()
+#endif
+
+#if defined(__SANITIZE_ADDRESS__) && !defined(__MINGW32__) // Cause MinGW doesn't seem to support ASAN
+#include "sanitizer/asan_interface.h"
+#define ASAN_POISON_MEMORY_REGION(addr, size) \
+    __asan_poison_memory_region((addr), (size))
+#define ASAN_UNPOISON_MEMORY_REGION(addr, size) \
+    __asan_unpoison_memory_region((addr), (size))
+#else
+#define ASAN_POISON_MEMORY_REGION(addr, size) \
+    ((void)(addr), (void)(size))
+#define ASAN_UNPOISON_MEMORY_REGION(addr, size) \
+    ((void)(addr), (void)(size))
 #endif
 
 #endif

@@ -4,8 +4,12 @@
 #ifndef CORE_IMPLEMENTATION
 #define CORE_IMPLEMENTATION
 #endif
+#ifndef MEMORY_IMPLEMENTATION
+#define MEMORY_IMPLEMENTATION
+#endif
 #endif
 #include "core.h"
+#include "memory.h"
 
 typedef struct {
     uptr start;
@@ -24,34 +28,15 @@ static inline bool arena_delete(arena_t* arena);
 #ifdef ARENA_IMPLEMENTATION
 
 #include <assert.h>
-#include <sys/mman.h>
-#include <unistd.h>
-
-#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
-#include "sanitizer/asan_interface.h"
-#define ASAN_POISON_MEMORY_REGION(addr, size) \
-    __asan_poison_memory_region((addr), (size))
-#define ASAN_UNPOISON_MEMORY_REGION(addr, size) \
-    __asan_unpoison_memory_region((addr), (size))
-#else
-#define ASAN_POISON_MEMORY_REGION(addr, size) \
-    ((void)(addr), (void)(size))
-#define ASAN_UNPOISON_MEMORY_REGION(addr, size) \
-    ((void)(addr), (void)(size))
-#endif
 
 static inline arena_t arena_make(const u64 size) {
     assert(size > 0);
 
-    const u64 aligned_size = align_size(size, getpagesize());
+    const u64 aligned_size = align_size(size, get_page_size());
 
-    const void* arena_start = mmap(NULL,
-                                   aligned_size,
-                                   PROT_READ | PROT_WRITE,
-                                   MAP_PRIVATE | MAP_ANONYMOUS,
-                                   -1,
-                                   0);
-    if (arena_start == MAP_FAILED) {
+    const void* arena_start = memory_map_anonymous(aligned_size, false);
+
+    if (arena_start == NULL) {
         return (arena_t){ .start = 0,
                           .capacity = 0,
                           .position = 0 };
@@ -80,7 +65,6 @@ static inline void* arena_alloc(arena_t* arena, const u64 size) {
     return arena_alloc_aligned(arena, size, DEFAULT_ALIGNMENT);
 }
 
-// TODO: Aligned alloc should probably align not the end, but the beginning. Also maybe add arena_align() function
 static inline void* arena_alloc_aligned(arena_t* arena, const u64 size, const u64 alignment) {
     assert(arena_valid(arena));
     assert(is_power_of_two(alignment));
@@ -91,10 +75,14 @@ static inline void* arena_alloc_aligned(arena_t* arena, const u64 size, const u6
         return NULL;
     }
 
-    void* ptr = (void*)(arena->start + arena->position);
+    void* ptr = (void*)(arena->start + align_size(arena->position, alignment));
     arena->position += aligned_size;
 
-    ASAN_UNPOISON_MEMORY_REGION((void*)ptr, aligned_size);
+#if defined(_WIN64)
+    VirtualAlloc(ptr, aligned_size, MEM_COMMIT, PAGE_READWRITE);
+#endif
+
+    ASAN_UNPOISON_MEMORY_REGION(ptr, aligned_size);
 
     return ptr;
 }
@@ -110,7 +98,7 @@ static inline void arena_clear(arena_t* arena) {
 static inline void arena_release(arena_t* arena) {
     assert(arena_valid(arena));
 
-    madvise((void*)arena->start, arena->capacity, MADV_DONTNEED);
+    memory_dontneed((void*)arena->start, arena->capacity);
 
     ASAN_POISON_MEMORY_REGION((void*)arena->start, arena->capacity);
 
@@ -122,7 +110,7 @@ static inline bool arena_delete(arena_t* arena) {
 
     ASAN_POISON_MEMORY_REGION((void*)arena->start, arena->capacity);
 
-    const bool result = munmap((void*)arena->start, arena->capacity) == 0;
+    const bool result = memory_unmap_anonymous((void*)arena->start, arena->capacity);
 
     arena->start = 0;
     arena->capacity = 0;
