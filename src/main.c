@@ -30,6 +30,7 @@ static i64 benchmark_files_processed = 0;
 static i64 benchmark_bytes_processed = 0;
 static i64 benchmark_start_time = 0;
 static i64 benchmark_end_time = 0;
+static f64 benchmark_float_accumulator = 0.0;
 
 typedef struct {
     c riff[4];
@@ -92,7 +93,10 @@ i32 db_to_i32(const f64 db, const i32 max_value) {
 }
 
 void open_file(const str_t* file_name) {
+}
 
+static inline i64 get_deinterleaved_index(const i64 byte_offset, const i64 channels, const i64 size, const i64 bytes_per_sample) {
+    return (byte_offset / bytes_per_sample) % channels * (size / bytes_per_sample / channels) + (byte_offset / bytes_per_sample / channels);
 }
 
 // TODO: Reuse memory!!1
@@ -245,7 +249,7 @@ void* process_file(void* arg) {
 
     const u8* original_data = data_chunk_in_file + 8;
 
-    i64 data_size = data_chunk.size / (fmt_chunk.block_align / fmt_chunk.channels) * 8;
+    i64 data_size = data_chunk.size / (fmt_chunk.block_align / fmt_chunk.channels) * 4;
 
     u8* data = mmap(NULL, align_size(data_size, getpagesize()), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
     if (data == MAP_FAILED) {
@@ -260,87 +264,129 @@ void* process_file(void* arg) {
     i32* data_i = (i32*)data;
     f32* data_f = (f32*)data;
 
-    // if (fmt_chunk.channels != 2 || fmt_chunk.format_type == 3 || fmt_chunk.format_type == 7 || fmt_chunk.bits_per_sample != 16) {
-    //     goto unmap_file;
-    // }
-
-    if (is_int)
-        switch (fmt_chunk.bits_per_sample) {
-        case 8:
-            for (u32 i = 0; i < data_chunk.size; i += sizeof(i8)) {
-                const u32 resulting_index = (i / sizeof(i8) / fmt_chunk.channels) + (data_chunk.size / sizeof(i8) / fmt_chunk.channels) * (i / sizeof(i8) % fmt_chunk.channels);
-                const i32 value = *(i8*)&original_data[i]; // NOLINT
-                data_i[resulting_index] = value;
-            }
+    switch (fmt_chunk.bits_per_sample) {
+    case 8: // int only
+        if (!is_int) {
+            int3();
             break;
-        case 16:
-            for (u32 i = 0; i < data_chunk.size; i += sizeof(i16)) {
-                const u32 resulting_index = (i / sizeof(i16) / fmt_chunk.channels) + (data_chunk.size / sizeof(i16) / fmt_chunk.channels) * (i / sizeof(i16) % fmt_chunk.channels);
-                i16 temp_value;
-                memcpy(&temp_value, &original_data[i], sizeof(i16));
-                data_i[resulting_index] = temp_value;
-            }
+        }
+
+        for (i64 i = 0; i < data_chunk.size; i += sizeof(i8)) {
+            const i64 resulting_index = get_deinterleaved_index(i, fmt_chunk.channels, data_chunk.size, 1);
+
+            const i32 value = *(i8*)&original_data[i]; // NOLINT
+            data_i[resulting_index] = value << 24;
+        }
+        break;
+    case 16: // int only
+        if (!is_int) {
+            int3();
             break;
-        case 24: // Widens to 32
-            for (u32 i = 0; i < data_chunk.size; i += 3) {
-                const u32 resulting_index = (i / 3 / fmt_chunk.channels) + (data_chunk.size / 3 / fmt_chunk.channels) * (i / 3 % fmt_chunk.channels);
+        }
 
-                u8* bytes = (u8*)&original_data[i];
-                i32 temp_value;
+        for (i64 i = 0; i < data_chunk.size; i += sizeof(i16)) {
+            const i64 resulting_index = get_deinterleaved_index(i, fmt_chunk.channels, data_chunk.size, 2);
 
-                temp_value = bytes[0] | bytes[1] << 8 | bytes[2] << 16;
-
-                if (temp_value & 0x800000) {
-                    temp_value |= (i32)0xFF000000;
-                }
-
-                data_i[resulting_index] = temp_value;
-            }
+            i16 temp_value;
+            memcpy(&temp_value, &original_data[i], sizeof(i16));
+            data_i[resulting_index] = temp_value << 16;
+        }
+        break;
+    case 24: // int only
+        if (!is_int) {
+            int3();
             break;
-        case 32:
-            for (u32 i = 0; i < data_chunk.size; i += sizeof(i32)) {
-                const u32 resulting_index = (i / sizeof(i32) / fmt_chunk.channels) + (data_chunk.size / sizeof(i32) / fmt_chunk.channels) * (i / sizeof(i32) % fmt_chunk.channels);
+        }
+
+        for (i64 i = 0; i < data_chunk.size; i += 3) {
+            const i64 resulting_index = get_deinterleaved_index(i, fmt_chunk.channels, data_chunk.size, 3);
+
+            u8* bytes = (u8*)&original_data[i];
+            i32 temp_value;
+
+            temp_value = bytes[0] | bytes[1] << 8 | bytes[2] << 16;
+
+            if (temp_value & 0x800000) {
+                temp_value |= (i32)0xFF000000;
+            }
+
+            data_i[resulting_index] = temp_value << 8;
+        }
+        break;
+    case 32: // int or float
+        if (is_int) {
+            for (i64 i = 0; i < data_chunk.size; i += sizeof(i32)) {
+                const i64 resulting_index = get_deinterleaved_index(i, fmt_chunk.channels, data_chunk.size, 4);
+
                 i32 temp_value;
                 memcpy(&temp_value, &original_data[i], sizeof(i32));
                 data_i[resulting_index] = temp_value;
             }
             break;
-        default:
-            int3();
-            break;
-        }
-    else {
-        switch (fmt_chunk.bits_per_sample) {
-        case 32:
-            for (u32 i = 0; i < data_chunk.size; i += sizeof(f32)) {
-                const u32 resulting_index = (i / sizeof(f32) / fmt_chunk.channels) + (data_chunk.size / sizeof(f32) / fmt_chunk.channels) * (i / sizeof(f32) % fmt_chunk.channels);
+        } else {
+            for (i64 i = 0; i < data_chunk.size; i += sizeof(i32)) {
+                const i64 resulting_index = get_deinterleaved_index(i, fmt_chunk.channels, data_chunk.size, 4);
+
                 f32 temp_value;
                 memcpy(&temp_value, &original_data[i], sizeof(f32));
                 data_f[resulting_index] = temp_value;
             }
             break;
-        case 64:
-            for (u32 i = 0; i < data_chunk.size; i += sizeof(f64)) {
-                const u32 resulting_index = (i / sizeof(f64) / fmt_chunk.channels) + (data_chunk.size / sizeof(f64) / fmt_chunk.channels) * (i / sizeof(f64) % fmt_chunk.channels);
-                f64 temp_value;
-                memcpy(&temp_value, &original_data[i], sizeof(f64));
-                data_f[resulting_index] = (f32)temp_value;
-            }
-            break;
-        default:
+        }
+    case 64: // float only
+        if (is_int) {
             int3();
             break;
         }
+
+        for (i64 i = 0; i < data_chunk.size; i += sizeof(f64)) {
+            const i64 resulting_index = get_deinterleaved_index(i, fmt_chunk.channels, data_chunk.size, 8);
+
+            f64 temp_value;
+            memcpy(&temp_value, &original_data[i], sizeof(f64));
+            data_f[resulting_index] = (f32)temp_value;
+        }
+        break;
+    default:
+        int3();
+        break;
     }
 
     TracyCZoneEnd(Deinterleave);
 
     TracyCZoneN(Analyze, "Analyze", true);
 
+    const i64 sample_count_total = data_size / 4;
+    const i64 channels = fmt_chunk.channels;
+    const i64 sample_count_channel = sample_count_total / channels;
 
+    f64 max_db = -INFINITY;
+    if (is_int) {
+        i32 max_value = 0;
+        for (i64 channel = 0; channel < channels; channel++) {
+            for (i64 sample = 0; sample < sample_count_channel; sample++) {
+                const i64 sample_index = sample + channel * sample;
+                const i32 value = data_i[sample_index];
+                max_value = abs(value) > max_value ? abs(value) : max_value;
+            }
+        }
+        max_db = i32_to_db(max_value);
+    } else {
+        f32 max_value = 0;
+        for (i64 channel = 0; channel < channels; channel++) {
+            for (i64 sample = 0; sample < sample_count_channel; sample++) {
+                const i64 sample_index = sample + channel * sample;
+                const f32 value = data_f[sample_index];
+                max_value = fabsf(value) > max_value ? fabsf(value) : max_value;
+            }
+        }
+        max_db = f32_to_db(max_value);
+    }
 
-    // str_write(*file_name, stdout, false);
-    // printf(": %.3f\n", max_db);
+    // benchmark_float_accumulator += max_db;
+
+    str_write(*file_name, stdout, false);
+    printf(": %.3f\n", max_db);
 
     TracyCZoneEnd(Analyze);
 
