@@ -25,17 +25,16 @@
 
 #ifdef _WIN32
 #include "libs/dirent.h"
-#include <io.h>
-#define realpath(N, R) _fullpath((R), (N), PATH_MAX)
-#define open(N, R) _open(N, R)
-#define close(N) _close(N)
 #else
 #include <dirent.h>
-#include <sys/mman.h>
-#include <unistd.h>
+// #include <unistd.h>
 #endif
 
 #define NUM_THREADS 6
+
+#include "load_file.c"
+#include "parse_file_info.c"
+#include "prepare_data.c"
 
 // TODO: Proper CLI args parsing
 // TODO: For each found file - check if it's a file. If it is - check if it's a .wav file (extension + RIFF), if it is - save its path. If it's a dir - recurse over the directory and do the same.
@@ -49,42 +48,6 @@ static i64 benchmark_start_time = 0;
 static i64 benchmark_end_time = 0;
 static i64 benchmark_int_accumulator = 0;
 static f64 benchmark_float_accumulator = 0.0f;
-
-typedef struct {
-    c riff[4];
-    u32 overall_size;
-    c wave[4];
-    c fmt_chunk_marker[4];
-    u32 length_of_fmt;
-    u16 format_type;
-    u16 channels;
-    u32 sample_rate;
-    u32 byterate;
-    u16 block_align;
-    u16 bits_per_sample;
-} wave_file_header_t;
-
-typedef struct {
-    c riff_marker[4];
-    u32 overall_size;
-    c wave_marker[4];
-} wave_riff_header_t;
-
-typedef struct {
-    c fmt_marker[4];
-    u32 fmt_size;
-    u16 format_type;
-    u16 channels;
-    u32 sample_rate;
-    u32 byterate;
-    u16 block_align;
-    u16 bits_per_sample;
-} wave_fmt_chunk_t;
-
-typedef struct {
-    c marker[4];
-    u32 size;
-} wave_generic_chunk_t;
 
 i64 get_current_time_ms() {
 #ifdef _WIN32
@@ -139,14 +102,9 @@ f64 db_to_f64(const f64 db) {
 void open_file(const str_t* file_name) {
 }
 
-static inline i64 get_deinterleaved_index(const i64 byte_offset, const i64 channels, const i64 size, const i64 bytes_per_sample) {
-    return (byte_offset / bytes_per_sample) % channels * (size / bytes_per_sample / channels) + (byte_offset / bytes_per_sample / channels);
-}
-
 // TODO: Reuse memory!!1
 void* process_file(void* arg) {
     TracyCZoneN(ProcessFile, "Process File", true);
-    TracyCZoneN(IORead, "IO Read", true);
     const str_t* file_name = arg;
 
     if (file_name == NULL) {
@@ -157,268 +115,30 @@ void* process_file(void* arg) {
 
     arena_t arena_temp_tl = arena_make(MB(8));
 
-    const c* file_name_cstr = str_to_cstr(&arena_temp_tl, file_name);
-    const int fd = open(file_name_cstr, O_RDONLY);
+    loaded_file_t loaded_file = load_file(&arena_temp_tl, file_name);
 
-    if (fd == -1) {
-        TracyCZoneEnd(IORead);
-        int3();
-        goto end;
-    }
+    // TODO: Check if file loaded
 
-    struct stat sb;
-    if (fstat(fd, &sb) == -1) {
-        TracyCZoneEnd(IORead);
-        int3();
-        goto close_file;
-    }
+    parsed_file_info_t parsed_file_info = parse_file_info(&loaded_file);
 
-    u8* file = memory_map_file(fd, sb.st_size, true, false, true);
+    // TODO: Check if file parsed
 
-    if (file == NULL) {
-        TracyCZoneEnd(IORead);
-        int3();
-        goto close_file;
-    }
+    prepared_data_t prepared_data = prepare_data(&parsed_file_info);
 
-    if (sb.st_size < 12) {
-        TracyCZoneEnd(IORead);
-        int3();
-        goto unmap_file;
-    }
-
-    TracyCZoneEnd(IORead);
-    TracyCZoneN(ParseHeaders, "Parse Headers", true);
-    wave_riff_header_t riff_header = {};
-    memcpy(&riff_header, file, 12);
-
-    const u8* fmt_chunk_in_file = file + 12;
-
-    if (fmt_chunk_in_file - file + 8 > sb.st_size) {
-        TracyCZoneEnd(ParseHeaders);
-
-        printf("fmt chunk is out of bounds, invalid file\n");
-        goto unmap_file;
-    }
-
-    while (memcmp(fmt_chunk_in_file, "fmt ", 4) != 0) {
-        u32 next_chunk_size;
-        memcpy(&next_chunk_size, fmt_chunk_in_file + 4, sizeof(u32));
-        fmt_chunk_in_file += 8 + next_chunk_size + (next_chunk_size & 1);
-        if (fmt_chunk_in_file > file + sb.st_size - sizeof(wave_fmt_chunk_t)) {
-            TracyCZoneEnd(ParseHeaders);
-            printf("Couldn't find fmt string\n");
-            int3();
-            goto unmap_file;
-        }
-    }
-
-    wave_fmt_chunk_t fmt_chunk = {};
-    memcpy(&fmt_chunk, fmt_chunk_in_file, sizeof(wave_fmt_chunk_t));
-
-    bool is_int;
-    if (fmt_chunk.format_type == 1) {
-        is_int = true;
-    } else if (fmt_chunk.format_type == 3) {
-        is_int = false;
-    } else if (fmt_chunk.format_type == 65534) {
-        const u8* guid_ptr = fmt_chunk_in_file + 8 + 24;
-        u32 guid_four_bytes;
-        memcpy(&guid_four_bytes, guid_ptr, sizeof(u32));
-        if (guid_four_bytes == 1) {
-            is_int = true;
-        } else if (guid_four_bytes == 3) {
-            is_int = false;
-        } else {
-            int3();
-            TracyCZoneEnd(ParseHeaders);
-            goto unmap_file;
-        }
-    } else {
-        int3();
-        TracyCZoneEnd(ParseHeaders);
-        goto unmap_file;
-    }
-
-    const u8* data_chunk_in_file = fmt_chunk_in_file + 8 + fmt_chunk.fmt_size + (fmt_chunk.fmt_size & 1);
-
-    if (data_chunk_in_file - file + 8 > sb.st_size) {
-        TracyCZoneEnd(ParseHeaders);
-        printf("Data chunk is out of bounds, invalid file\n");
-        goto unmap_file;
-    }
-
-    while (memcmp(data_chunk_in_file, "data", 4) != 0) {
-        u32 next_chunk_size;
-        memcpy(&next_chunk_size, data_chunk_in_file + 4, sizeof(u32));
-        data_chunk_in_file += 8 + next_chunk_size + (next_chunk_size & 1);
-        if (data_chunk_in_file > file + sb.st_size - sizeof(wave_generic_chunk_t)) {
-            TracyCZoneEnd(ParseHeaders);
-            printf("Couldn't find data string\n");
-            int3();
-            goto unmap_file;
-        }
-    }
-
-    wave_generic_chunk_t data_chunk = {};
-    memcpy(&data_chunk, data_chunk_in_file, sizeof(wave_generic_chunk_t));
-
-    const i64 remaining_size_after_data = (sb.st_size - (data_chunk_in_file + 8 - file)) - data_chunk.size;
-
-    if (remaining_size_after_data < 0) {
-        TracyCZoneEnd(ParseHeaders);
-        printf("Data size is not valid\n");
-        int3();
-        goto unmap_file;
-    }
-
-    // printf("RIFF: %.4s, Size: %u, WAVE: %.4s, fmt: %.3s, fmt_size: %u, format_type: %u, channels: %u, sample_rate: %u, byterate: %u, block_align: %u, bits_per_sample: %u, data: %.4s, data_size: %u, data_size_difference: %lld\n",
-    //        riff_header.riff_marker,
-    //        riff_header.overall_size,
-    //        riff_header.wave_marker,
-    //        fmt_chunk.fmt_marker,
-    //        fmt_chunk.fmt_size,
-    //        fmt_chunk.format_type,
-    //        fmt_chunk.channels,
-    //        fmt_chunk.sample_rate,
-    //        fmt_chunk.byterate,
-    //        fmt_chunk.block_align,
-    //        fmt_chunk.bits_per_sample,
-    //        data_chunk.marker,
-    //        data_chunk.size,
-    //        remaining_size_after_data);
-
-    TracyCZoneEnd(ParseHeaders);
-    TracyCZoneN(Allocation, "Allocation", true);
-
-    const u8* original_data = data_chunk_in_file + 8;
-
-    i64 data_size = data_chunk.size / (fmt_chunk.block_align / fmt_chunk.channels) * 4;
-
-    u8* data = memory_map_anonymous(data_size, true);
-
-    if (data == NULL) {
-        TracyCZoneEnd(Allocation);
-        int3();
-        goto unmap_file;
-    }
-
-    TracyCZoneEnd(Allocation);
-    TracyCZoneN(Deinterleave, "Deinterleave", true);
-
-    i32* data_i = (i32*)data;
-    f32* data_f = (f32*)data;
-
-    switch (fmt_chunk.bits_per_sample) {
-    case 8: // int only
-        TracyCZoneName(Deinterleave, "Deinterleave 8-bit int", 22);
-        if (!is_int) {
-            int3();
-            break;
-        }
-
-        for (i64 i = 0; i < data_chunk.size; i += sizeof(i8)) {
-            const i64 resulting_index = get_deinterleaved_index(i, fmt_chunk.channels, data_chunk.size, 1);
-
-            const i32 value = *(i8*)&original_data[i]; // NOLINT
-            data_i[resulting_index] = (i32)((u32)value << 24);
-        }
-        break;
-    case 16: // int only
-        TracyCZoneName(Deinterleave, "Deinterleave 16-bit int", 23);
-        if (!is_int) {
-            int3();
-            break;
-        }
-
-        for (i64 i = 0; i < data_chunk.size; i += sizeof(i16)) {
-            const i64 resulting_index = get_deinterleaved_index(i, fmt_chunk.channels, data_chunk.size, 2);
-
-            i16 temp_value;
-            memcpy(&temp_value, &original_data[i], sizeof(i16));
-            data_i[resulting_index] = (i32)((u32)temp_value << 16);
-        }
-        break;
-    case 24: // int only
-        TracyCZoneName(Deinterleave, "Deinterleave 24-bit int", 23);
-        if (!is_int) {
-            int3();
-            break;
-        }
-
-        for (i64 i = 0; i < data_chunk.size; i += 3) {
-            const i64 resulting_index = get_deinterleaved_index(i, fmt_chunk.channels, data_chunk.size, 3);
-
-            u8* bytes = (u8*)&original_data[i];
-            i32 temp_value;
-
-            temp_value = bytes[0] | bytes[1] << 8 | bytes[2] << 16;
-
-            if (temp_value & 0x800000) {
-                temp_value |= (i32)0xFF000000;
-            }
-
-            data_i[resulting_index] = (i32)((u32)temp_value << 8);
-        }
-        break;
-    case 32: // int or float
-        if (is_int) {
-            TracyCZoneName(Deinterleave, "Deinterleave 32-bit int", 23);
-            for (i64 i = 0; i < data_chunk.size; i += sizeof(i32)) {
-                const i64 resulting_index = get_deinterleaved_index(i, fmt_chunk.channels, data_chunk.size, 4);
-
-                i32 temp_value;
-                memcpy(&temp_value, &original_data[i], sizeof(i32));
-                data_i[resulting_index] = temp_value;
-            }
-            break;
-        } else {
-            TracyCZoneName(Deinterleave, "Deinterleave 32-bit float", 25);
-            for (i64 i = 0; i < data_chunk.size; i += sizeof(i32)) {
-                const i64 resulting_index = get_deinterleaved_index(i, fmt_chunk.channels, data_chunk.size, 4);
-
-                f32 temp_value;
-                memcpy(&temp_value, &original_data[i], sizeof(f32));
-                data_f[resulting_index] = temp_value;
-            }
-            break;
-        }
-    case 64: // float only
-        TracyCZoneName(Deinterleave, "Deinterleave 64-bit float", 25);
-        if (is_int) {
-            int3();
-            break;
-        }
-
-        for (i64 i = 0; i < data_chunk.size; i += sizeof(f64)) {
-            const i64 resulting_index = get_deinterleaved_index(i, fmt_chunk.channels, data_chunk.size, 8);
-
-            f64 temp_value;
-            memcpy(&temp_value, &original_data[i], sizeof(f64));
-            data_f[resulting_index] = (f32)temp_value;
-        }
-        break;
-    default:
-        int3();
-        break;
-    }
-
-    TracyCZoneEnd(Deinterleave);
+    unload_file(&loaded_file);
 
     TracyCZoneN(Analyze, "Analyze", true);
 
-    const i64 sample_count_total = data_size / 4;
-    const i64 channels = fmt_chunk.channels;
-    const i64 sample_count_channel = sample_count_total / channels;
+    const i64 sample_count_channel = prepared_data.size / prepared_data.channels;
 
     f64 max_db = 0;
-    if (is_int) {
+    if (prepared_data.data_type == DATA_TYPE_INT) {
         u32 current_value;
         i64 max_value = 0;
-        for (i64 channel = 0; channel < channels; channel++) {
+        for (i64 channel = 0; channel < prepared_data.channels; channel++) {
             for (i64 sample = 0; sample < sample_count_channel; sample++) {
                 const i64 sample_index = sample + channel * sample_count_channel;
-                const i32 value = data_i[sample_index];
+                const i32 value = prepared_data.data[sample_index].i32;
 
                 current_value = (u32)llabs((i64)value); // TODO: Optimize
                 max_value = current_value > max_value ? current_value : max_value;
@@ -428,10 +148,10 @@ void* process_file(void* arg) {
     } else {
         f32 current_value;
         f32 max_value = 0.0f;
-        for (i64 channel = 0; channel < channels; channel++) {
+        for (i64 channel = 0; channel < prepared_data.channels; channel++) {
             for (i64 sample = 0; sample < sample_count_channel; sample++) {
                 const i64 sample_index = sample + channel * sample_count_channel;
-                const f32 value = data_f[sample_index];
+                const f32 value = prepared_data.data[sample_index].f32;
 
                 current_value = fabsf(value);
                 max_value = current_value > max_value ? current_value : max_value;
@@ -440,7 +160,7 @@ void* process_file(void* arg) {
         max_db = f32_to_db(max_value);
     }
 
-    benchmark_int_accumulator += sample_count_total;
+    benchmark_int_accumulator += prepared_data.size;
     benchmark_float_accumulator += max_db;
 
     // str_write(file_name, stdout, true);
@@ -449,14 +169,10 @@ void* process_file(void* arg) {
     TracyCZoneEnd(Analyze);
 
     benchmark_files_processed++;
-    benchmark_bytes_processed += data_chunk.size;
+    benchmark_bytes_processed += parsed_file_info.size;
 
-unmap_data:
-    memory_unmap_anonymous(data, data_size);
-unmap_file:
-    memory_unmap_file(file, sb.st_size);
-close_file:
-    close(fd);
+unload_prepared_data:
+    unload_prepared_data(&prepared_data);
 
     arena_clear(&arena_temp_tl);
 

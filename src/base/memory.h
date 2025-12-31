@@ -51,7 +51,7 @@ static inline bool memory_unmap_anonymous(void* ptr, const u64 size) {
     assert(result);
     return result;
 #elif defined(__linux__)
-    const bool result = munmap(ptr, size) == 0;
+    const bool result = munmap(ptr, align_size(size, get_page_size())) == 0;
     assert(result);
     return result;
 #else
