@@ -6,6 +6,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_C_STANDARD 11)
 
+set(CMAKE_CXX_STANDARD 17)
+
 add_executable(audio-analyzer src/main.c)
 
 if (MSVC)
@@ -64,28 +66,29 @@ else ()
     )
 endif ()
 
+if (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    add_compile_definitions(USE_TRACY)
 
-#if (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-#    include(FetchContent)
-#    FetchContent_Declare(
-#            yaml-cpp
-#            GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-#            GIT_SHALLOW TRUE
-#            GIT_PROGRESS TRUE
-#    )
-#    FetchContent_MakeAvailable(yaml-cpp)
-#    target_link_libraries(audio-analyzer PUBLIC yaml-cpp)
-#
-#    include(FetchContent)
-#    option(TRACY_ENABLE "" ON)
-#    option(TRACY_ON_DEMAND "" ON)
-#    FetchContent_Declare(
-#            tracy
-#            GIT_REPOSITORY https://github.com/wolfpld/tracy.git
-#            GIT_TAG v0.13.1
-#            GIT_SHALLOW TRUE
-#            GIT_PROGRESS TRUE
-#    )
-#    FetchContent_MakeAvailable(tracy)
-#    target_link_libraries(audio-analyzer PUBLIC TracyClient)
-#endif ()
+    include(FetchContent)
+    FetchContent_Declare(
+            yaml-cpp
+            GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+            GIT_SHALLOW TRUE
+            GIT_PROGRESS TRUE
+    )
+    FetchContent_MakeAvailable(yaml-cpp)
+    target_link_libraries(audio-analyzer PUBLIC yaml-cpp)
+
+    include(FetchContent)
+    option(TRACY_ENABLE "" ON)
+    option(TRACY_ON_DEMAND "" ON)
+    FetchContent_Declare(
+            tracy
+            GIT_REPOSITORY https://github.com/wolfpld/tracy.git
+            GIT_TAG v0.13.1
+            GIT_SHALLOW TRUE
+            GIT_PROGRESS TRUE
+    )
+    FetchContent_MakeAvailable(tracy)
+    target_link_libraries(audio-analyzer PUBLIC TracyClient)
+endif ()

@@ -96,6 +96,13 @@ static inline u8* memory_map_file(const i32 fd, const i64 size, const bool read,
         return NULL;
     }
 
+    if (populate) {
+        WIN32_MEMORY_RANGE_ENTRY range;
+        range.VirtualAddress = data;
+        range.NumberOfBytes = align_size(size, get_page_size());
+        PrefetchVirtualMemory(GetCurrentProcess(), 1, &range, 0);
+    }
+
     return data;
 #elif defined(__linux__)
     u8* data = mmap(NULL, size, PROT_READ, MAP_PRIVATE | MAP_POPULATE, fd, 0);
