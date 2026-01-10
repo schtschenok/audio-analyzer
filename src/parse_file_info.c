@@ -126,7 +126,7 @@ parsed_file_info_t parse_file_info(loaded_file_t* loaded_file) {
     parsed_file_info.sample_rate = fmt_chunk.sample_rate;
     parsed_file_info.result = PARSE_FILE_INFO_SUCCESS;
 
-    TracyCZoneEnd(ParseFileInfo);
 end:
+    TracyCZoneEnd(ParseFileInfo);
     return parsed_file_info;
 }

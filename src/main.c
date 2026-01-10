@@ -113,6 +113,14 @@ void* process_file(void* arg) {
         goto end;
     }
 
+    // TODO: Do proper filename validation somewhere
+    const char last_symbol = *(file_name->start + file_name->length - 1);
+    if (last_symbol != 'v') {
+        TracyCZoneEnd(IORead);
+        // int3();
+        goto end;
+    }
+
     arena_t arena_temp_tl = arena_make(MB(8));
 
     loaded_file_t loaded_file = load_file(&arena_temp_tl, file_name);
@@ -163,8 +171,8 @@ void* process_file(void* arg) {
     benchmark_int_accumulator += prepared_data.size;
     benchmark_float_accumulator += max_db;
 
-    // str_write(file_name, stdout, true);
-    // printf(": %.3f\n", max_db);
+    str_write(file_name, stdout, false);
+    printf(" %.1f\n", max_db);
 
     TracyCZoneEnd(Analyze);
 
